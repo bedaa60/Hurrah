@@ -736,3 +736,85 @@ contract Hurrah {
         uint256 minOut = (o.amountOutMin * fillAmountIn) / o.amountIn;
         if (fillAmountOut < minOut) return (false, "HRH_InvalidFillAmount");
         return (true, bytes32(0));
+    }
+
+    function getActiveOrderIdsForMaker(address maker, uint256 offset, uint256 limit)
+        external
+        view
+        returns (bytes32[] memory ids)
+    {
+        bytes32[] storage all = _makerOrderIds[maker];
+        uint256 n = 0;
+        for (uint256 i = offset; i < all.length && n < limit; i++) {
+            if (isOrderActive(all[i])) n++;
+        }
+        ids = new bytes32[](n);
+        uint256 j = 0;
+        for (uint256 i = offset; i < all.length && j < n; i++) {
+            if (isOrderActive(all[i])) {
+                ids[j] = all[i];
+                j++;
+            }
+        }
+        return ids;
+    }
+
+    function countActiveOrdersForMaker(address maker) external view returns (uint256) {
+        bytes32[] storage all = _makerOrderIds[maker];
+        uint256 c = 0;
+        for (uint256 i = 0; i < all.length; i++) {
+            if (isOrderActive(all[i])) c++;
+        }
+        return c;
+    }
+
+    mapping(uint64 => bool) private _chainPaused;
+
+    event ChainPauseSet(uint64 indexed chainId, bool paused, uint256 atBlock);
+
+    function setChainPaused(uint64 chainId, bool paused) external onlyGovernor {
+        _chainPaused[chainId] = paused;
+        emit ChainPauseSet(chainId, paused, block.number);
+    }
+
+    function isChainPaused(uint64 chainId) external view returns (bool) {
+        return _chainPaused[chainId];
+    }
+
+    function getOrderIdsForAssetPair(bytes32 assetIn, bytes32 assetOut, uint256 maxResults)
+        external
+        view
+        returns (bytes32[] memory orderIds)
+    {
+        uint256 cap = maxResults > _orderIds.length ? _orderIds.length : maxResults;
+        uint256[] memory indices = new uint256[](cap);
+        uint256 count = 0;
+        for (uint256 i = 0; i < _orderIds.length && count < cap; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (o.exists && !o.cancelled && !o.settled && block.number <= o.expiryBlock && o.amountFilledIn < o.amountIn
+                && o.assetIn == assetIn && o.assetOut == assetOut) {
+                indices[count] = i;
+                count++;
+            }
+        }
+        orderIds = new bytes32[](count);
+        for (uint256 j = 0; j < count; j++) {
+            orderIds[j] = _orderIds[indices[j]];
+        }
+        return orderIds;
+    }
+
+    function getOrderIdsForOriginChain(uint64 chainIdOrigin, uint256 fromIdx, uint256 toIdx)
+        external
+        view
+        returns (bytes32[] memory out)
+    {
+        bytes32[] storage arr = _orderIdsByOriginChain[chainIdOrigin];
+        if (fromIdx > toIdx || toIdx >= arr.length) revert HRH_InvalidIndex();
+        uint256 n = toIdx - fromIdx + 1;
+        out = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) out[i] = arr[fromIdx + i];
+        return out;
+    }
+
+    function getOrderIdsForSettleChain(uint64 chainIdSettle, uint256 fromIdx, uint256 toIdx)
