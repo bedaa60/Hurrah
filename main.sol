@@ -162,3 +162,85 @@ contract Hurrah {
     mapping(address => bytes32[]) private _makerOrderIds;
     mapping(uint64 => bytes32[]) private _orderIdsByOriginChain;
     mapping(uint64 => bytes32[]) private _orderIdsBySettleChain;
+
+    // -------------------------------------------------------------------------
+    // CONSTRUCTOR
+    // -------------------------------------------------------------------------
+
+    constructor() {
+        governor = 0x7F4a2c8E1b3D9f0A5c6E8b1D4f7A0c3E6b9D2f5;
+        settlementKeeper = 0x8E5b3c9F2a4D0e6B7c9F1a4D7e0B3c6F9a2D5e8;
+        feeCollector = 0x9F6c4d0A3b5E1f7C8d0A3b6E9f2C5d8A1b4E7c0;
+        bridgeRelay = 0xA07d5e1B4c6F2a8D9e1B4c7F0a3D6e9B2c5F8a1;
+        feeBps = 25; // 0.25%
+        minOrderAmount = 1e15; // 0.001 ether
+        maxOrderAmount = 1e24; // 1M ether
+    }
+
+    // -------------------------------------------------------------------------
+    // MODIFIERS
+    // -------------------------------------------------------------------------
+
+    modifier onlyGovernor() {
+        if (msg.sender != governor) revert HRH_NotGovernor();
+        _;
+    }
+
+    modifier onlySettlementKeeper() {
+        if (msg.sender != settlementKeeper) revert HRH_NotSettlementKeeper();
+        _;
+    }
+
+    modifier onlyFeeCollector() {
+        if (msg.sender != feeCollector) revert HRH_NotFeeCollector();
+        _;
+    }
+
+    modifier onlyBridgeRelay() {
+        if (msg.sender != bridgeRelay) revert HRH_NotBridgeRelay();
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (orderBookPaused) revert HRH_BookPaused();
+        _;
+    }
+
+    modifier nonReentrant() {
+        if (_guard != 0) revert HRH_Reentrant();
+        _guard = 1;
+        _;
+        _guard = 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // ADMIN
+    // -------------------------------------------------------------------------
+
+    function setFeeBps(uint256 newFeeBps) external onlyGovernor {
+        if (newFeeBps > HRH_MAX_FEE_BPS) revert HRH_InvalidFeeBps();
+        uint256 prev = feeBps;
+        feeBps = newFeeBps;
+        emit FeeBpsChanged(prev, newFeeBps, block.number);
+    }
+
+    function setOrderBookPaused(bool paused) external onlyGovernor {
+        orderBookPaused = paused;
+        emit OrderBookPaused(paused, block.number);
+    }
+
+    function setMinOrderAmount(uint256 newMin) external onlyGovernor {
+        if (newMin > maxOrderAmount) revert HRH_InvalidAmount();
+        uint256 prev = minOrderAmount;
+        minOrderAmount = newMin;
+        emit MinOrderAmountChanged(prev, newMin, block.number);
+    }
+
+    function setMaxOrderAmount(uint256 newMax) external onlyGovernor {
+        if (newMax < minOrderAmount) revert HRH_InvalidAmount();
+        uint256 prev = maxOrderAmount;
+        maxOrderAmount = newMax;
+        emit MaxOrderAmountChanged(prev, newMax, block.number);
+    }
+
+    // -------------------------------------------------------------------------
