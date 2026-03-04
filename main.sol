@@ -1146,3 +1146,85 @@ contract Hurrah {
                 && o.chainIdOrigin == chainOrigin && o.chainIdSettle == chainSettle) {
                 orderIds[j] = _orderIds[i];
                 j++;
+            }
+        }
+        return orderIds;
+    }
+
+    function hasActiveOrder(address maker, bytes32 orderId) external view returns (bool) {
+        if (!_orders[orderId].exists || _orders[orderId].maker != maker) return false;
+        return isOrderActive(orderId);
+    }
+
+    function getFillProgress(bytes32 orderId) external view returns (uint256 filled, uint256 total, uint256 remaining) {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        return (o.amountFilledIn, o.amountIn, o.amountIn - o.amountFilledIn);
+    }
+
+    function getEffectivePrice(bytes32 orderId) external view returns (uint256 amountOutPerUnitIn) {
+        Order storage o = _orders[orderId];
+        if (!o.exists || o.amountIn == 0) revert HRH_OrderNotFound();
+        return (o.amountOutMin * 1e18) / o.amountIn;
+    }
+
+    function isOrderFullyFilled(bytes32 orderId) external view returns (bool) {
+        Order storage o = _orders[orderId];
+        return o.exists && o.amountFilledIn >= o.amountIn;
+    }
+
+    function isOrderExpired(bytes32 orderId) external view returns (bool) {
+        Order storage o = _orders[orderId];
+        return o.exists && block.number > o.expiryBlock;
+    }
+
+    function getRoleAddresses() external view returns (address gov, address keeper, address feeCol, address relay) {
+        return (governor, settlementKeeper, feeCollector, bridgeRelay);
+    }
+
+    function getLimits() external view returns (uint256 minAmt, uint256 maxAmt, uint256 maxOrders) {
+        return (minOrderAmount, maxOrderAmount, HRH_MAX_ORDERS);
+    }
+
+    function getFeeConfig() external view returns (uint256 bps, uint256 denom, uint256 maxBps) {
+        return (feeBps, HRH_FEE_DENOM_BPS, HRH_MAX_FEE_BPS);
+    }
+
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return false;
+    }
+
+    // -------------------------------------------------------------------------
+    // PURE HELPERS & CONSTANTS EXPOSURE
+    // -------------------------------------------------------------------------
+
+    function feeDenomBps() external pure returns (uint256) { return HRH_FEE_DENOM_BPS; }
+    function maxFeeBps() external pure returns (uint256) { return HRH_MAX_FEE_BPS; }
+    function sideBuy() external pure returns (uint8) { return uint8(HRH_SIDE_BUY); }
+    function sideSell() external pure returns (uint8) { return uint8(HRH_SIDE_SELL); }
+    function maxOrdersLimit() external pure returns (uint256) { return HRH_MAX_ORDERS; }
+    function minExpiryOffsetBlocks() external pure returns (uint256) { return HRH_MIN_EXPIRY_OFFSET; }
+    function maxExpiryOffsetBlocks() external pure returns (uint256) { return HRH_MAX_EXPIRY_OFFSET; }
+    function maxBatchCancel() external pure returns (uint256) { return HRH_MAX_BATCH_CANCEL; }
+    function maxBatchFill() external pure returns (uint256) { return HRH_MAX_BATCH_FILL; }
+    function maxBatchPost() external pure returns (uint256) { return HRH_MAX_BATCH_POST; }
+    function namespace() external pure returns (bytes32) { return HRH_NAMESPACE; }
+    function versionHash() external pure returns (bytes32) { return HRH_VERSION; }
+
+    // -------------------------------------------------------------------------
+    // BULK ORDER SUMMARY (GAS-EFFICIENT BATCH READ)
+    // -------------------------------------------------------------------------
+
+    struct OrderSummary {
+        bytes32 orderId;
+        address maker;
+        uint8 side;
+        uint64 chainIdOrigin;
+        uint64 chainIdSettle;
+        uint256 amountIn;
+        uint256 amountOutMin;
+        uint256 amountFilledIn;
+        uint64 expiryBlock;
+        bool cancelled;
+        bool settled;
+    }
