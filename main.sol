@@ -572,3 +572,85 @@ contract Hurrah {
     }
 
     function getOrdersBatch(bytes32[] calldata orderIds)
+        external
+        view
+        returns (
+            address[] memory makers,
+            uint8[] memory sides,
+            uint64[] memory chainIdsOrigin,
+            uint64[] memory chainIdsSettle,
+            uint256[] memory amountsIn,
+            uint256[] memory amountsOutMin,
+            uint256[] memory amountsFilledIn,
+            uint64[] memory expiryBlocks,
+            bool[] memory cancelled,
+            bool[] memory settled
+        )
+    {
+        uint256 n = orderIds.length;
+        makers = new address[](n);
+        sides = new uint8[](n);
+        chainIdsOrigin = new uint64[](n);
+        chainIdsSettle = new uint64[](n);
+        amountsIn = new uint256[](n);
+        amountsOutMin = new uint256[](n);
+        amountsFilledIn = new uint256[](n);
+        expiryBlocks = new uint64[](n);
+        cancelled = new bool[](n);
+        settled = new bool[](n);
+        for (uint256 i = 0; i < n; i++) {
+            Order storage o = _orders[orderIds[i]];
+            if (!o.exists) continue;
+            makers[i] = o.maker;
+            sides[i] = o.side;
+            chainIdsOrigin[i] = o.chainIdOrigin;
+            chainIdsSettle[i] = o.chainIdSettle;
+            amountsIn[i] = o.amountIn;
+            amountsOutMin[i] = o.amountOutMin;
+            amountsFilledIn[i] = o.amountFilledIn;
+            expiryBlocks[i] = o.expiryBlock;
+            cancelled[i] = o.cancelled;
+            settled[i] = o.settled;
+        }
+        return (
+            makers,
+            sides,
+            chainIdsOrigin,
+            chainIdsSettle,
+            amountsIn,
+            amountsOutMin,
+            amountsFilledIn,
+            expiryBlocks,
+            cancelled,
+            settled
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEWS: FEE & CONFIG
+    // -------------------------------------------------------------------------
+
+    function computeFeeForFill(uint256 fillAmountOut) external view returns (uint256 fee) {
+        return (fillAmountOut * feeBps) / HRH_FEE_DENOM_BPS;
+    }
+
+    function computeMakerReceive(uint256 fillAmountOut) external view returns (uint256) {
+        uint256 fee = (fillAmountOut * feeBps) / HRH_FEE_DENOM_BPS;
+        return fillAmountOut - fee;
+    }
+
+    function currentFeeBps() external view returns (uint256) {
+        return feeBps;
+    }
+
+    function config() external view returns (uint256 _feeBps, uint256 _minOrderAmount, uint256 _maxOrderAmount, bool _paused) {
+        return (feeBps, minOrderAmount, maxOrderAmount, orderBookPaused);
+    }
+
+    function contractBalanceWei() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    // -------------------------------------------------------------------------
+    // UTILITY: DERIVE ORDER ID
+    // -------------------------------------------------------------------------
