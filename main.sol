@@ -80,3 +80,85 @@ contract Hurrah {
     error HRH_BookPaused();
     error HRH_Reentrant();
     error HRH_TransferFailed();
+    error HRH_InsufficientValue();
+    error HRH_InvalidFeeBps();
+    error HRH_AlreadySettled();
+    error HRH_SettlementRefUsed();
+    error HRH_MakerCannotTake();
+    error HRH_MaxOrdersReached();
+    error HRH_AmountBelowMin();
+    error HRH_AmountAboveMax();
+    error HRH_InvalidExpiry();
+    error HRH_InvalidIndex();
+    error HRH_EmptyBatch();
+    error HRH_NotMaker();
+
+    // -------------------------------------------------------------------------
+    // CONSTANTS
+    // -------------------------------------------------------------------------
+
+    uint256 public constant HRH_FEE_DENOM_BPS = 10_000;
+    uint256 public constant HRH_MAX_FEE_BPS = 300; // 3%
+    uint256 public constant HRH_SIDE_BUY = 0;
+    uint256 public constant HRH_SIDE_SELL = 1;
+    uint256 public constant HRH_MAX_ORDERS = 150_000;
+    uint256 public constant HRH_MIN_EXPIRY_OFFSET = 2;
+    uint256 public constant HRH_MAX_EXPIRY_OFFSET = 2_000_000;
+    uint256 public constant HRH_MAX_BATCH_CANCEL = 128;
+    uint256 public constant HRH_MAX_BATCH_FILL = 64;
+
+    bytes32 public constant HRH_NAMESPACE = keccak256("Hurrah.otc.v2");
+    bytes32 public constant HRH_VERSION = keccak256("hurrah.version.2");
+
+    // -------------------------------------------------------------------------
+    // IMMUTABLES
+    // -------------------------------------------------------------------------
+
+    address public immutable governor;
+    address public immutable settlementKeeper;
+    address public immutable feeCollector;
+    address public immutable bridgeRelay;
+
+    // -------------------------------------------------------------------------
+    // STATE
+    // -------------------------------------------------------------------------
+
+    struct Order {
+        bytes32 orderId;
+        address maker;
+        uint8 side;
+        uint64 chainIdOrigin;
+        uint64 chainIdSettle;
+        bytes32 assetIn;
+        bytes32 assetOut;
+        uint256 amountIn;
+        uint256 amountOutMin;
+        uint256 amountFilledIn;
+        uint64 expiryBlock;
+        bool exists;
+        bool cancelled;
+        bool settled;
+        uint64 postedAt;
+    }
+
+    struct SettlementRecord {
+        bytes32 orderId;
+        bytes32 settlementRef;
+        uint64 chainIdSettle;
+        uint64 finalizedAt;
+    }
+
+    uint256 public feeBps;
+    uint256 public minOrderAmount;
+    uint256 public maxOrderAmount;
+    bool public orderBookPaused;
+    uint256 private _guard;
+    uint256 public orderCount;
+
+    mapping(bytes32 => Order) private _orders;
+    mapping(bytes32 => SettlementRecord) private _settlements;
+    mapping(bytes32 => bool) private _settlementRefUsed;
+    bytes32[] private _orderIds;
+    mapping(address => bytes32[]) private _makerOrderIds;
+    mapping(uint64 => bytes32[]) private _orderIdsByOriginChain;
+    mapping(uint64 => bytes32[]) private _orderIdsBySettleChain;
