@@ -900,3 +900,85 @@ contract Hurrah {
             Order storage o = _orders[_orderIds[i]];
             if (o.exists && !o.settled && block.number > o.expiryBlock && o.amountFilledIn > 0) count++;
         }
+        out = new bytes32[](count);
+        uint256 j = 0;
+        for (uint256 i = fromIndex; i <= toIndex && j < count; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (o.exists && !o.settled && block.number > o.expiryBlock && o.amountFilledIn > 0) {
+                out[j] = _orderIds[i];
+                j++;
+            }
+        }
+        return out;
+    }
+
+    function quoteFill(bytes32 orderId, uint256 fillAmountIn)
+        external
+        view
+        returns (uint256 minAmountOut, uint256 feeAmount, uint256 makerReceives)
+    {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        uint256 remaining = o.amountIn - o.amountFilledIn;
+        if (fillAmountIn == 0 || fillAmountIn > remaining) revert HRH_InvalidFillAmount();
+        minAmountOut = (o.amountOutMin * fillAmountIn) / o.amountIn;
+        feeAmount = (minAmountOut * feeBps) / HRH_FEE_DENOM_BPS;
+        makerReceives = minAmountOut - feeAmount;
+        return (minAmountOut, feeAmount, makerReceives);
+    }
+
+    function getSettlementsBatch(bytes32[] calldata orderIds)
+        external
+        view
+        returns (
+            bytes32[] memory refs,
+            uint64[] memory chainIds,
+            uint64[] memory finalizedAt
+        )
+    {
+        uint256 n = orderIds.length;
+        refs = new bytes32[](n);
+        chainIds = new uint64[](n);
+        finalizedAt = new uint64[](n);
+        for (uint256 i = 0; i < n; i++) {
+            SettlementRecord storage s = _settlements[orderIds[i]];
+            if (s.finalizedAt != 0) {
+                refs[i] = s.settlementRef;
+                chainIds[i] = s.chainIdSettle;
+                finalizedAt[i] = s.finalizedAt;
+            }
+        }
+        return (refs, chainIds, finalizedAt);
+    }
+
+    uint256 public constant HRH_MAX_BATCH_POST = 32;
+
+    function postOrdersBatch(
+        bytes32[] calldata orderIds,
+        uint8[] calldata sides,
+        uint64[] calldata chainIdsOrigin,
+        uint64[] calldata chainIdsSettle,
+        bytes32[] calldata assetsIn,
+        bytes32[] calldata assetsOut,
+        uint256[] calldata amountsIn,
+        uint256[] calldata amountsOutMin,
+        uint64[] calldata expiryBlocks
+    ) external whenNotPaused nonReentrant {
+        uint256 len = orderIds.length;
+        if (len == 0 || len > HRH_MAX_BATCH_POST) revert HRH_InvalidAmount();
+        if (len != sides.length || len != chainIdsOrigin.length || len != chainIdsSettle.length) revert HRH_InvalidAmount();
+        if (len != assetsIn.length || len != assetsOut.length || len != amountsIn.length || len != amountsOutMin.length || len != expiryBlocks.length) revert HRH_InvalidAmount();
+        for (uint256 i = 0; i < len; i++) {
+            if (orderCount >= HRH_MAX_ORDERS) revert HRH_MaxOrdersReached();
+            bytes32 oid = orderIds[i];
+            if (oid == bytes32(0) || _orders[oid].exists) continue;
+            if (sides[i] > HRH_SIDE_SELL) continue;
+            if (amountsIn[i] < minOrderAmount || amountsIn[i] > maxOrderAmount) continue;
+            if (chainIdsOrigin[i] == 0 || chainIdsSettle[i] == 0) continue;
+            if (expiryBlocks[i] <= block.number || expiryBlocks[i] - block.number < HRH_MIN_EXPIRY_OFFSET || expiryBlocks[i] - block.number > HRH_MAX_EXPIRY_OFFSET) continue;
+            if (_chainPaused[chainIdsOrigin[i]] || _chainPaused[chainIdsSettle[i]]) continue;
+
+            Order memory o = Order({
+                orderId: oid,
+                maker: msg.sender,
+                side: sides[i],
