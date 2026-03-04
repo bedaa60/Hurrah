@@ -982,3 +982,85 @@ contract Hurrah {
                 orderId: oid,
                 maker: msg.sender,
                 side: sides[i],
+                chainIdOrigin: chainIdsOrigin[i],
+                chainIdSettle: chainIdsSettle[i],
+                assetIn: assetsIn[i],
+                assetOut: assetsOut[i],
+                amountIn: amountsIn[i],
+                amountOutMin: amountsOutMin[i],
+                amountFilledIn: 0,
+                expiryBlock: expiryBlocks[i],
+                exists: true,
+                cancelled: false,
+                settled: false,
+                postedAt: uint64(block.timestamp)
+            });
+            _orders[oid] = o;
+            _orderIds.push(oid);
+            _makerOrderIds[msg.sender].push(oid);
+            _orderIdsByOriginChain[chainIdsOrigin[i]].push(oid);
+            _orderIdsBySettleChain[chainIdsSettle[i]].push(oid);
+            orderCount++;
+            emit OrderPosted(oid, msg.sender, sides[i], chainIdsOrigin[i], chainIdsSettle[i], assetsIn[i], assetsOut[i], amountsIn[i], amountsOutMin[i], expiryBlocks[i], uint64(block.timestamp));
+        }
+    }
+
+    function fillOrdersBatch(
+        bytes32[] calldata orderIds,
+        uint256[] calldata fillAmountsIn,
+        uint256[] calldata fillAmountsOut
+    ) external payable whenNotPaused nonReentrant {
+        if (orderIds.length == 0 || orderIds.length != fillAmountsIn.length || orderIds.length != fillAmountsOut.length) revert HRH_InvalidAmount();
+        if (orderIds.length > HRH_MAX_BATCH_FILL) revert HRH_InvalidAmount();
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < orderIds.length; i++) {
+            Order storage o = _orders[orderIds[i]];
+            if (!o.exists || o.cancelled || o.maker == msg.sender || block.number > o.expiryBlock) continue;
+            uint256 remaining = o.amountIn - o.amountFilledIn;
+            if (remaining == 0) continue;
+            uint256 fillIn = fillAmountsIn[i];
+            uint256 fillOut = fillAmountsOut[i];
+            if (fillIn == 0 || fillIn > remaining) continue;
+            if (fillOut < (o.amountOutMin * fillIn) / o.amountIn) continue;
+            totalValue += fillOut;
+        }
+        if (msg.value < totalValue) revert HRH_InsufficientValue();
+        uint256 paid = 0;
+        for (uint256 i = 0; i < orderIds.length; i++) {
+            Order storage o = _orders[orderIds[i]];
+            if (!o.exists || o.cancelled || o.maker == msg.sender || block.number > o.expiryBlock) continue;
+            uint256 remaining = o.amountIn - o.amountFilledIn;
+            if (remaining == 0) continue;
+            uint256 fillIn = fillAmountsIn[i];
+            uint256 fillOut = fillAmountsOut[i];
+            if (fillIn == 0 || fillIn > remaining) continue;
+            if (fillOut < (o.amountOutMin * fillIn) / o.amountIn) continue;
+            uint256 fee = (fillOut * feeBps) / HRH_FEE_DENOM_BPS;
+            uint256 makerReceives = fillOut - fee;
+            if (feeBps > 0 && feeCollector != address(0)) {
+                (bool feeOk, ) = feeCollector.call{value: fee}("");
+                if (!feeOk) revert HRH_TransferFailed();
+            }
+            (bool payOk, ) = o.maker.call{value: makerReceives}("");
+            if (!payOk) revert HRH_TransferFailed();
+            paid += fillOut;
+            o.amountFilledIn += fillIn;
+            emit OrderFilled(orderIds[i], msg.sender, fillIn, fillOut, uint64(block.timestamp));
+        }
+        if (msg.value > paid) {
+            (bool refundOk, ) = msg.sender.call{value: msg.value - paid}("");
+            if (!refundOk) revert HRH_TransferFailed();
+        }
+    }
+
+    function name() external pure returns (string memory) {
+        return "Hurrah OTC Order Book";
+    }
+
+    function version() external pure returns (string memory) {
+        return "2.0.0";
+    }
+
+    function domainSeparator() external view returns (bytes32) {
+        return keccak256(abi.encodePacked(HRH_NAMESPACE, block.chainid, address(this)));
+    }
