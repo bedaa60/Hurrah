@@ -1064,3 +1064,85 @@ contract Hurrah {
     function domainSeparator() external view returns (bytes32) {
         return keccak256(abi.encodePacked(HRH_NAMESPACE, block.chainid, address(this)));
     }
+
+    // -------------------------------------------------------------------------
+    // EXTENDED VIEWS: ORDER BOOK SNAPSHOT HELPERS
+    // -------------------------------------------------------------------------
+
+    function getOrderBookSnapshot(uint256 fromIndex, uint256 count)
+        external
+        view
+        returns (
+            bytes32[] memory ids,
+            address[] memory makers,
+            uint8[] memory sides,
+            uint256[] memory amountsIn,
+            uint256[] memory amountsOutMin,
+            uint256[] memory amountsFilled,
+            uint64[] memory expiries,
+            bool[] memory active
+        )
+    {
+        if (fromIndex >= _orderIds.length) revert HRH_InvalidIndex();
+        uint256 end = fromIndex + count;
+        if (end > _orderIds.length) end = _orderIds.length;
+        uint256 n = end - fromIndex;
+        ids = new bytes32[](n);
+        makers = new address[](n);
+        sides = new uint8[](n);
+        amountsIn = new uint256[](n);
+        amountsOutMin = new uint256[](n);
+        amountsFilled = new uint256[](n);
+        expiries = new uint64[](n);
+        active = new bool[](n);
+        for (uint256 i = 0; i < n; i++) {
+            bytes32 oid = _orderIds[fromIndex + i];
+            Order storage o = _orders[oid];
+            ids[i] = oid;
+            if (o.exists) {
+                makers[i] = o.maker;
+                sides[i] = o.side;
+                amountsIn[i] = o.amountIn;
+                amountsOutMin[i] = o.amountOutMin;
+                amountsFilled[i] = o.amountFilledIn;
+                expiries[i] = o.expiryBlock;
+                active[i] = !o.cancelled && !o.settled && block.number <= o.expiryBlock && o.amountFilledIn < o.amountIn;
+            }
+        }
+        return (ids, makers, sides, amountsIn, amountsOutMin, amountsFilled, expiries, active);
+    }
+
+    function getOrdersBySide(uint8 side, uint256 maxResults) external view returns (bytes32[] memory orderIds) {
+        uint256 cap = maxResults > _orderIds.length ? _orderIds.length : maxResults;
+        uint256[] memory temp = new uint256[](cap);
+        uint256 count = 0;
+        for (uint256 i = 0; i < _orderIds.length && count < cap; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (o.exists && !o.cancelled && !o.settled && block.number <= o.expiryBlock && o.amountFilledIn < o.amountIn && o.side == side) {
+                temp[count] = i;
+                count++;
+            }
+        }
+        orderIds = new bytes32[](count);
+        for (uint256 j = 0; j < count; j++) orderIds[j] = _orderIds[temp[j]];
+        return orderIds;
+    }
+
+    function getOrdersByChains(uint64 chainOrigin, uint64 chainSettle, uint256 maxResults) external view returns (bytes32[] memory orderIds) {
+        uint256 cap = maxResults > _orderIds.length ? _orderIds.length : maxResults;
+        uint256 count = 0;
+        for (uint256 i = 0; i < _orderIds.length && count < cap; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (o.exists && !o.cancelled && !o.settled && block.number <= o.expiryBlock && o.amountFilledIn < o.amountIn
+                && o.chainIdOrigin == chainOrigin && o.chainIdSettle == chainSettle) {
+                count++;
+            }
+        }
+        orderIds = new bytes32[](count);
+        uint256 j = 0;
+        for (uint256 i = 0; i < _orderIds.length && j < count; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (o.exists && !o.cancelled && !o.settled && block.number <= o.expiryBlock && o.amountFilledIn < o.amountIn
+                && o.chainIdOrigin == chainOrigin && o.chainIdSettle == chainSettle) {
+                orderIds[j] = _orderIds[i];
+                j++;
