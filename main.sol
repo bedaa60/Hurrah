@@ -244,3 +244,85 @@ contract Hurrah {
     }
 
     // -------------------------------------------------------------------------
+    // ORDER BOOK: POST
+    // -------------------------------------------------------------------------
+
+    function postOrder(
+        bytes32 orderId,
+        uint8 side,
+        uint64 chainIdOrigin,
+        uint64 chainIdSettle,
+        bytes32 assetIn,
+        bytes32 assetOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint64 expiryBlock
+    ) external whenNotPaused nonReentrant {
+        if (orderId == bytes32(0)) revert HRH_ZeroOrderId();
+        if (_orders[orderId].exists) revert HRH_OrderNotFound();
+        if (orderCount >= HRH_MAX_ORDERS) revert HRH_MaxOrdersReached();
+        if (side > HRH_SIDE_SELL) revert HRH_InvalidSide();
+        if (amountIn < minOrderAmount) revert HRH_AmountBelowMin();
+        if (amountIn > maxOrderAmount) revert HRH_AmountAboveMax();
+        if (chainIdOrigin == 0 || chainIdSettle == 0) revert HRH_InvalidChainId();
+        if (expiryBlock <= block.number) revert HRH_OrderExpired();
+        if (expiryBlock - block.number < HRH_MIN_EXPIRY_OFFSET) revert HRH_InvalidExpiry();
+        if (expiryBlock - block.number > HRH_MAX_EXPIRY_OFFSET) revert HRH_InvalidExpiry();
+
+        Order memory o = Order({
+            orderId: orderId,
+            maker: msg.sender,
+            side: side,
+            chainIdOrigin: chainIdOrigin,
+            chainIdSettle: chainIdSettle,
+            assetIn: assetIn,
+            assetOut: assetOut,
+            amountIn: amountIn,
+            amountOutMin: amountOutMin,
+            amountFilledIn: 0,
+            expiryBlock: expiryBlock,
+            exists: true,
+            cancelled: false,
+            settled: false,
+            postedAt: uint64(block.timestamp)
+        });
+
+        _orders[orderId] = o;
+        _orderIds.push(orderId);
+        _makerOrderIds[msg.sender].push(orderId);
+        _orderIdsByOriginChain[chainIdOrigin].push(orderId);
+        _orderIdsBySettleChain[chainIdSettle].push(orderId);
+        orderCount++;
+
+        emit OrderPosted(
+            orderId,
+            msg.sender,
+            side,
+            chainIdOrigin,
+            chainIdSettle,
+            assetIn,
+            assetOut,
+            amountIn,
+            amountOutMin,
+            expiryBlock,
+            uint64(block.timestamp)
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // ORDER BOOK: FILL
+    // -------------------------------------------------------------------------
+
+    function fillOrder(
+        bytes32 orderId,
+        uint256 fillAmountIn,
+        uint256 fillAmountOut
+    ) external payable whenNotPaused nonReentrant {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        if (o.cancelled) revert HRH_OrderCancelled();
+        if (o.maker == msg.sender) revert HRH_MakerCannotTake();
+        if (block.number > o.expiryBlock) revert HRH_OrderExpired();
+        uint256 remaining = o.amountIn - o.amountFilledIn;
+        if (remaining == 0) revert HRH_OrderAlreadyFilled();
+        if (fillAmountIn == 0 || fillAmountIn > remaining) revert HRH_InvalidFillAmount();
