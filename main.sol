@@ -654,3 +654,85 @@ contract Hurrah {
     // -------------------------------------------------------------------------
     // UTILITY: DERIVE ORDER ID
     // -------------------------------------------------------------------------
+
+    function deriveOrderId(address maker, bytes32 salt, uint256 nonce) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked(HRH_NAMESPACE, maker, salt, nonce));
+    }
+
+    // -------------------------------------------------------------------------
+    // RECEIVE ETH (for taker payments)
+    // -------------------------------------------------------------------------
+
+    receive() external payable {}
+
+    // -------------------------------------------------------------------------
+    // EXTENDED VIEWS: ORDER FULL & HELPERS
+    // -------------------------------------------------------------------------
+
+    function getOrderFull(bytes32 orderId)
+        external
+        view
+        returns (
+            bytes32 id,
+            address makerAddr,
+            uint8 sideVal,
+            uint64 chainOrigin,
+            uint64 chainSettle,
+            bytes32 assetInId,
+            bytes32 assetOutId,
+            uint256 amtIn,
+            uint256 amtOutMin,
+            uint256 amtFilledIn,
+            uint256 amtRemaining,
+            uint64 expiryBlk,
+            bool isCancelled,
+            bool isSettled,
+            uint64 postedTime
+        )
+    {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        uint256 remaining = o.amountIn - o.amountFilledIn;
+        return (
+            o.orderId,
+            o.maker,
+            o.side,
+            o.chainIdOrigin,
+            o.chainIdSettle,
+            o.assetIn,
+            o.assetOut,
+            o.amountIn,
+            o.amountOutMin,
+            o.amountFilledIn,
+            remaining,
+            o.expiryBlock,
+            o.cancelled,
+            o.settled,
+            o.postedAt
+        );
+    }
+
+    function minOutForFill(bytes32 orderId, uint256 fillAmountIn) external view returns (uint256) {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        if (fillAmountIn > o.amountIn - o.amountFilledIn) revert HRH_InvalidFillAmount();
+        return (o.amountOutMin * fillAmountIn) / o.amountIn;
+    }
+
+    function wouldFillSucceed(
+        bytes32 orderId,
+        address takerAddr,
+        uint256 fillAmountIn,
+        uint256 fillAmountOut
+    ) external view returns (bool success, bytes32 err) {
+        Order storage o = _orders[orderId];
+        if (!o.exists) return (false, "HRH_OrderNotFound");
+        if (o.cancelled) return (false, "HRH_OrderCancelled");
+        if (o.maker == takerAddr) return (false, "HRH_MakerCannotTake");
+        if (block.number > o.expiryBlock) return (false, "HRH_OrderExpired");
+        uint256 remaining = o.amountIn - o.amountFilledIn;
+        if (remaining == 0) return (false, "HRH_OrderAlreadyFilled");
+        if (fillAmountIn == 0 || fillAmountIn > remaining) return (false, "HRH_InvalidFillAmount");
+        uint256 minOut = (o.amountOutMin * fillAmountIn) / o.amountIn;
+        if (fillAmountOut < minOut) return (false, "HRH_InvalidFillAmount");
+        return (true, bytes32(0));
