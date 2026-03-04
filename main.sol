@@ -408,3 +408,85 @@ contract Hurrah {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // SETTLEMENT (CROSS-CHAIN)
+    // -------------------------------------------------------------------------
+
+    function finalizeSettlement(
+        bytes32 orderId,
+        uint64 chainIdSettle,
+        bytes32 settlementRef
+    ) external onlySettlementKeeper nonReentrant {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        if (o.settled) revert HRH_AlreadySettled();
+        if (_settlementRefUsed[settlementRef]) revert HRH_SettlementRefUsed();
+        if (chainIdSettle != o.chainIdSettle) revert HRH_InvalidChainId();
+
+        _settlementRefUsed[settlementRef] = true;
+        o.settled = true;
+        _settlements[orderId] = SettlementRecord({
+            orderId: orderId,
+            settlementRef: settlementRef,
+            chainIdSettle: chainIdSettle,
+            finalizedAt: uint64(block.timestamp)
+        });
+
+        emit SettlementFinalized(orderId, chainIdSettle, settlementRef, uint64(block.timestamp));
+    }
+
+    function finalizeSettlementBatch(
+        bytes32[] calldata orderIds,
+        uint64[] calldata chainIdsSettle,
+        bytes32[] calldata settlementRefs
+    ) external onlySettlementKeeper nonReentrant {
+        if (orderIds.length == 0 || orderIds.length != chainIdsSettle.length || orderIds.length != settlementRefs.length) revert HRH_InvalidAmount();
+        if (orderIds.length > HRH_MAX_BATCH_FILL) revert HRH_InvalidAmount();
+        for (uint256 i = 0; i < orderIds.length; i++) {
+            Order storage o = _orders[orderIds[i]];
+            if (!o.exists || o.settled || _settlementRefUsed[settlementRefs[i]]) continue;
+            if (chainIdsSettle[i] != o.chainIdSettle) continue;
+            _settlementRefUsed[settlementRefs[i]] = true;
+            o.settled = true;
+            _settlements[orderIds[i]] = SettlementRecord({
+                orderId: orderIds[i],
+                settlementRef: settlementRefs[i],
+                chainIdSettle: chainIdsSettle[i],
+                finalizedAt: uint64(block.timestamp)
+            });
+            emit SettlementFinalized(orderIds[i], chainIdsSettle[i], settlementRefs[i], uint64(block.timestamp));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEWS: SINGLE ORDER
+    // -------------------------------------------------------------------------
+
+    function getOrder(bytes32 orderId)
+        external
+        view
+        returns (
+            address maker,
+            uint8 side,
+            uint64 chainIdOrigin,
+            uint64 chainIdSettle,
+            bytes32 assetIn,
+            bytes32 assetOut,
+            uint256 amountIn,
+            uint256 amountOutMin,
+            uint256 amountFilledIn,
+            uint64 expiryBlock,
+            bool cancelled,
+            bool settled,
+            uint64 postedAt
+        )
+    {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        return (
+            o.maker,
+            o.side,
+            o.chainIdOrigin,
+            o.chainIdSettle,
+            o.assetIn,
+            o.assetOut,
