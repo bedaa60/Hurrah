@@ -1228,3 +1228,85 @@ contract Hurrah {
         bool cancelled;
         bool settled;
     }
+
+    function getOrderSummariesInRange(uint256 fromIndex, uint256 toIndex)
+        external
+        view
+        returns (OrderSummary[] memory summaries)
+    {
+        if (fromIndex > toIndex || toIndex >= _orderIds.length) revert HRH_InvalidIndex();
+        uint256 n = toIndex - fromIndex + 1;
+        summaries = new OrderSummary[](n);
+        for (uint256 i = 0; i < n; i++) {
+            bytes32 oid = _orderIds[fromIndex + i];
+            Order storage o = _orders[oid];
+            summaries[i] = OrderSummary({
+                orderId: oid,
+                maker: o.maker,
+                side: o.side,
+                chainIdOrigin: o.chainIdOrigin,
+                chainIdSettle: o.chainIdSettle,
+                amountIn: o.amountIn,
+                amountOutMin: o.amountOutMin,
+                amountFilledIn: o.amountFilledIn,
+                expiryBlock: o.expiryBlock,
+                cancelled: o.cancelled,
+                settled: o.settled
+            });
+        }
+        return summaries;
+    }
+
+    function getOrderSummariesForMaker(address maker, uint256 offset, uint256 limit)
+        external
+        view
+        returns (OrderSummary[] memory summaries)
+    {
+        bytes32[] storage ids = _makerOrderIds[maker];
+        if (offset >= ids.length) return new OrderSummary[](0);
+        uint256 end = offset + limit;
+        if (end > ids.length) end = ids.length;
+        uint256 n = end - offset;
+        summaries = new OrderSummary[](n);
+        for (uint256 i = 0; i < n; i++) {
+            bytes32 oid = ids[offset + i];
+            Order storage o = _orders[oid];
+            summaries[i] = OrderSummary({
+                orderId: oid,
+                maker: o.maker,
+                side: o.side,
+                chainIdOrigin: o.chainIdOrigin,
+                chainIdSettle: o.chainIdSettle,
+                amountIn: o.amountIn,
+                amountOutMin: o.amountOutMin,
+                amountFilledIn: o.amountFilledIn,
+                expiryBlock: o.expiryBlock,
+                cancelled: o.cancelled,
+                settled: o.settled
+            });
+        }
+        return summaries;
+    }
+
+    function getOrderIdByMakerAndIndex(address maker, uint256 index) external view returns (bytes32) {
+        bytes32[] storage ids = _makerOrderIds[maker];
+        if (index >= ids.length) revert HRH_InvalidIndex();
+        return ids[index];
+    }
+
+    function getOriginChainOrderCount(uint64 chainId) external view returns (uint256) {
+        return _orderIdsByOriginChain[chainId].length;
+    }
+
+    function getSettleChainOrderCount(uint64 chainId) external view returns (uint256) {
+        return _orderIdsBySettleChain[chainId].length;
+    }
+
+    function validateOrderParams(
+        uint8 side,
+        uint64 chainIdOrigin,
+        uint64 chainIdSettle,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint64 expiryBlock
+    ) external view returns (bool valid) {
