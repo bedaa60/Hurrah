@@ -1310,3 +1310,73 @@ contract Hurrah {
         uint256 amountOutMin,
         uint64 expiryBlock
     ) external view returns (bool valid) {
+        if (side > HRH_SIDE_SELL) return false;
+        if (chainIdOrigin == 0 || chainIdSettle == 0) return false;
+        if (amountIn < minOrderAmount || amountIn > maxOrderAmount) return false;
+        if (expiryBlock <= block.number) return false;
+        if (expiryBlock - block.number < HRH_MIN_EXPIRY_OFFSET || expiryBlock - block.number > HRH_MAX_EXPIRY_OFFSET) return false;
+        if (_chainPaused[chainIdOrigin] || _chainPaused[chainIdSettle]) return false;
+        return true;
+    }
+
+    function estimateFeeForAmount(uint256 amountOut) external view returns (uint256 feeWei) {
+        return (amountOut * feeBps) / HRH_FEE_DENOM_BPS;
+    }
+
+    function canFill(bytes32 orderId, address takerAddr, uint256 fillAmountIn) external view returns (bool) {
+        Order storage o = _orders[orderId];
+        if (!o.exists || o.cancelled || o.settled) return false;
+        if (o.maker == takerAddr) return false;
+        if (block.number > o.expiryBlock) return false;
+        if (o.amountFilledIn >= o.amountIn) return false;
+        if (fillAmountIn == 0 || fillAmountIn > o.amountIn - o.amountFilledIn) return false;
+        if (orderBookPaused) return false;
+        return true;
+    }
+
+    function canCancel(bytes32 orderId, address makerAddr) external view returns (bool) {
+        Order storage o = _orders[orderId];
+        return o.exists && o.maker == makerAddr && !o.cancelled && o.amountFilledIn < o.amountIn;
+    }
+
+    function canSettle(bytes32 orderId) external view returns (bool) {
+        Order storage o = _orders[orderId];
+        return o.exists && !o.settled && o.amountFilledIn > 0;
+    }
+
+    function getOrderIdsPaginated(uint256 pageSize, uint256 pageIndex) external view returns (bytes32[] memory ids) {
+        if (pageSize == 0) revert HRH_InvalidAmount();
+        uint256 start = pageIndex * pageSize;
+        if (start >= _orderIds.length) return new bytes32[](0);
+        uint256 end = start + pageSize;
+        if (end > _orderIds.length) end = _orderIds.length;
+        uint256 n = end - start;
+        ids = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) ids[i] = _orderIds[start + i];
+        return ids;
+    }
+
+    function totalPages(uint256 pageSize) external view returns (uint256) {
+        if (pageSize == 0) return 0;
+        return (_orderIds.length + pageSize - 1) / pageSize;
+    }
+
+    function getBlockNumber() external view returns (uint256) {
+        return block.number;
+    }
+
+    function getChainId() external view returns (uint256) {
+        return block.chainid;
+    }
+
+    function orderPostedAt(bytes32 orderId) external view returns (uint64) {
+        if (!_orders[orderId].exists) revert HRH_OrderNotFound();
+        return _orders[orderId].postedAt;
+    }
+
+    function orderAssets(bytes32 orderId) external view returns (bytes32 assetIn, bytes32 assetOut) {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        return (o.assetIn, o.assetOut);
+    }
+}
