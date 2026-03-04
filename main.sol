@@ -326,3 +326,85 @@ contract Hurrah {
         uint256 remaining = o.amountIn - o.amountFilledIn;
         if (remaining == 0) revert HRH_OrderAlreadyFilled();
         if (fillAmountIn == 0 || fillAmountIn > remaining) revert HRH_InvalidFillAmount();
+        if (fillAmountOut < (o.amountOutMin * fillAmountIn) / o.amountIn) revert HRH_InvalidFillAmount();
+
+        uint256 fee = (fillAmountOut * feeBps) / HRH_FEE_DENOM_BPS;
+        uint256 makerReceives = fillAmountOut - fee;
+        if (feeBps > 0 && feeCollector != address(0)) {
+            (bool feeOk, ) = feeCollector.call{value: fee}("");
+            if (!feeOk) revert HRH_TransferFailed();
+        }
+        (bool payOk, ) = o.maker.call{value: makerReceives}("");
+        if (!payOk) revert HRH_TransferFailed();
+        if (msg.value > fillAmountOut) {
+            (bool refundOk, ) = msg.sender.call{value: msg.value - fillAmountOut}("");
+            if (!refundOk) revert HRH_TransferFailed();
+        } else if (msg.value < fillAmountOut) {
+            revert HRH_InsufficientValue();
+        }
+
+        o.amountFilledIn += fillAmountIn;
+        emit OrderFilled(orderId, msg.sender, fillAmountIn, fillAmountOut, uint64(block.timestamp));
+    }
+
+    function fillOrderExactOut(
+        bytes32 orderId,
+        uint256 fillAmountIn,
+        uint256 exactAmountOut
+    ) external payable whenNotPaused nonReentrant {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        if (o.cancelled) revert HRH_OrderCancelled();
+        if (o.maker == msg.sender) revert HRH_MakerCannotTake();
+        if (block.number > o.expiryBlock) revert HRH_OrderExpired();
+        uint256 remaining = o.amountIn - o.amountFilledIn;
+        if (remaining == 0) revert HRH_OrderAlreadyFilled();
+        if (fillAmountIn == 0 || fillAmountIn > remaining) revert HRH_InvalidFillAmount();
+        uint256 minOut = (o.amountOutMin * fillAmountIn) / o.amountIn;
+        if (exactAmountOut < minOut) revert HRH_InvalidFillAmount();
+
+        uint256 fee = (exactAmountOut * feeBps) / HRH_FEE_DENOM_BPS;
+        uint256 makerReceives = exactAmountOut - fee;
+        if (feeBps > 0 && feeCollector != address(0)) {
+            (bool feeOk, ) = feeCollector.call{value: fee}("");
+            if (!feeOk) revert HRH_TransferFailed();
+        }
+        (bool payOk, ) = o.maker.call{value: makerReceives}("");
+        if (!payOk) revert HRH_TransferFailed();
+        if (msg.value > exactAmountOut) {
+            (bool refundOk, ) = msg.sender.call{value: msg.value - exactAmountOut}("");
+            if (!refundOk) revert HRH_TransferFailed();
+        } else if (msg.value < exactAmountOut) {
+            revert HRH_InsufficientValue();
+        }
+
+        o.amountFilledIn += fillAmountIn;
+        emit OrderFilled(orderId, msg.sender, fillAmountIn, exactAmountOut, uint64(block.timestamp));
+    }
+
+    // -------------------------------------------------------------------------
+    // ORDER BOOK: CANCEL
+    // -------------------------------------------------------------------------
+
+    function cancelOrder(bytes32 orderId) external nonReentrant {
+        Order storage o = _orders[orderId];
+        if (!o.exists) revert HRH_OrderNotFound();
+        if (o.maker != msg.sender) revert HRH_NotMaker();
+        if (o.cancelled) revert HRH_OrderCancelled();
+        if (o.amountFilledIn >= o.amountIn) revert HRH_OrderAlreadyFilled();
+        o.cancelled = true;
+        emit OrderCancelled(orderId, msg.sender, uint64(block.timestamp));
+    }
+
+    function cancelOrdersBatch(bytes32[] calldata orderIds) external nonReentrant {
+        if (orderIds.length == 0) revert HRH_EmptyBatch();
+        if (orderIds.length > HRH_MAX_BATCH_CANCEL) revert HRH_InvalidAmount();
+        for (uint256 i = 0; i < orderIds.length; i++) {
+            Order storage o = _orders[orderIds[i]];
+            if (o.exists && o.maker == msg.sender && !o.cancelled && o.amountFilledIn < o.amountIn) {
+                o.cancelled = true;
+                emit OrderCancelled(orderIds[i], msg.sender, uint64(block.timestamp));
+            }
+        }
+    }
+
