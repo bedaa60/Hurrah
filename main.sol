@@ -818,3 +818,85 @@ contract Hurrah {
     }
 
     function getOrderIdsForSettleChain(uint64 chainIdSettle, uint256 fromIdx, uint256 toIdx)
+        external
+        view
+        returns (bytes32[] memory out)
+    {
+        bytes32[] storage arr = _orderIdsBySettleChain[chainIdSettle];
+        if (fromIdx > toIdx || toIdx >= arr.length) revert HRH_InvalidIndex();
+        uint256 n = toIdx - fromIdx + 1;
+        out = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) out[i] = arr[fromIdx + i];
+        return out;
+    }
+
+    function getGlobalStats()
+        external
+        view
+        returns (
+            uint256 totalOrders,
+            uint256 totalOrdersActive,
+            uint256 totalOrdersFilled,
+            uint256 totalOrdersCancelled,
+            uint256 totalOrdersSettled
+        )
+    {
+        totalOrders = _orderIds.length;
+        uint256 active = 0;
+        uint256 filled = 0;
+        uint256 cancelled = 0;
+        uint256 settled = 0;
+        for (uint256 i = 0; i < _orderIds.length; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (!o.exists) continue;
+            if (o.cancelled) cancelled++;
+            else if (o.amountFilledIn >= o.amountIn) filled++;
+            else if (block.number > o.expiryBlock) filled++;
+            else active++;
+            if (o.settled) settled++;
+        }
+        return (totalOrders, active, filled, cancelled, settled);
+    }
+
+    function getMakerStats(address maker)
+        external
+        view
+        returns (uint256 posted, uint256 active, uint256 filled, uint256 cancelled)
+    {
+        bytes32[] storage ids = _makerOrderIds[maker];
+        posted = ids.length;
+        for (uint256 i = 0; i < ids.length; i++) {
+            Order storage o = _orders[ids[i]];
+            if (!o.exists) continue;
+            if (o.cancelled) cancelled++;
+            else if (o.amountFilledIn >= o.amountIn || block.number > o.expiryBlock) filled++;
+            else active++;
+        }
+        return (posted, active, filled, cancelled);
+    }
+
+    function getActiveOrderIdsInRange(uint256 fromIndex, uint256 toIndex) external view returns (bytes32[] memory out) {
+        if (fromIndex > toIndex || toIndex >= _orderIds.length) revert HRH_InvalidIndex();
+        uint256 n = toIndex - fromIndex + 1;
+        uint256 count = 0;
+        for (uint256 i = fromIndex; i <= toIndex; i++) {
+            if (isOrderActive(_orderIds[i])) count++;
+        }
+        out = new bytes32[](count);
+        uint256 j = 0;
+        for (uint256 i = fromIndex; i <= toIndex && j < count; i++) {
+            if (isOrderActive(_orderIds[i])) {
+                out[j] = _orderIds[i];
+                j++;
+            }
+        }
+        return out;
+    }
+
+    function getExpiredButUnsettledOrderIds(uint256 fromIndex, uint256 toIndex) external view returns (bytes32[] memory out) {
+        if (fromIndex > toIndex || toIndex >= _orderIds.length) revert HRH_InvalidIndex();
+        uint256 count = 0;
+        for (uint256 i = fromIndex; i <= toIndex; i++) {
+            Order storage o = _orders[_orderIds[i]];
+            if (o.exists && !o.settled && block.number > o.expiryBlock && o.amountFilledIn > 0) count++;
+        }
