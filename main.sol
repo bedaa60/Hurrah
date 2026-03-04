@@ -490,3 +490,85 @@ contract Hurrah {
             o.chainIdSettle,
             o.assetIn,
             o.assetOut,
+            o.amountIn,
+            o.amountOutMin,
+            o.amountFilledIn,
+            o.expiryBlock,
+            o.cancelled,
+            o.settled,
+            o.postedAt
+        );
+    }
+
+    function orderExists(bytes32 orderId) external view returns (bool) {
+        return _orders[orderId].exists;
+    }
+
+    function orderMaker(bytes32 orderId) external view returns (address) {
+        if (!_orders[orderId].exists) revert HRH_OrderNotFound();
+        return _orders[orderId].maker;
+    }
+
+    function orderAmountRemaining(bytes32 orderId) external view returns (uint256) {
+        Order storage o = _orders[orderId];
+        if (!o.exists || o.cancelled) return 0;
+        return o.amountIn - o.amountFilledIn;
+    }
+
+    function isOrderActive(bytes32 orderId) external view returns (bool) {
+        Order storage o = _orders[orderId];
+        return o.exists && !o.cancelled && !o.settled && block.number <= o.expiryBlock && o.amountFilledIn < o.amountIn;
+    }
+
+    function getSettlement(bytes32 orderId)
+        external
+        view
+        returns (bytes32 settlementRef, uint64 chainIdSettle, uint64 finalizedAt)
+    {
+        SettlementRecord storage s = _settlements[orderId];
+        if (s.finalizedAt == 0) revert HRH_OrderNotFound();
+        return (s.settlementRef, s.chainIdSettle, s.finalizedAt);
+    }
+
+    function settlementRefUsed(bytes32 ref) external view returns (bool) {
+        return _settlementRefUsed[ref];
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEWS: LISTS
+    // -------------------------------------------------------------------------
+
+    function getOrderIdAt(uint256 index) external view returns (bytes32) {
+        if (index >= _orderIds.length) revert HRH_InvalidIndex();
+        return _orderIds[index];
+    }
+
+    function totalOrderCount() external view returns (uint256) {
+        return _orderIds.length;
+    }
+
+    function getOrderIdsInRange(uint256 fromIndex, uint256 toIndex) external view returns (bytes32[] memory out) {
+        if (fromIndex > toIndex || toIndex >= _orderIds.length) revert HRH_InvalidIndex();
+        uint256 n = toIndex - fromIndex + 1;
+        out = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) out[i] = _orderIds[fromIndex + i];
+        return out;
+    }
+
+    function getMakerOrderIds(address maker) external view returns (bytes32[] memory) {
+        return _makerOrderIds[maker];
+    }
+
+    function getMakerOrderCount(address maker) external view returns (uint256) {
+        return _makerOrderIds[maker].length;
+    }
+
+    function getOrderIdsByOriginChain(uint64 chainIdOrigin) external view returns (bytes32[] memory) {
+        return _orderIdsByOriginChain[chainIdOrigin];
+    }
+
+    function getOrderIdsBySettleChain(uint64 chainIdSettle) external view returns (bytes32[] memory) {
+        return _orderIdsBySettleChain[chainIdSettle];
+    }
+
+    function getOrdersBatch(bytes32[] calldata orderIds)
